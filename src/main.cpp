@@ -140,8 +140,13 @@ bool setFormat(Config& cfg, const char* value)
 	return false;
 	}
 
-void printUsage(const char* progName)
+void printUsage(const char* progPath)
 	{
+	// Extract just the filename from the path
+	string path = progPath;
+	size_t pos = path.find_last_of("/\\");
+	string progName = (pos != string::npos) ? path.substr(pos + 1) : path;
+
 	cout << progName << ":\n"
 		<< "\tStabilizes and crops videos of aircraft against reasonably cloud free skies.\n\n"
 		<< "\tUsage: " << progName << " filename [windowSize] [threshold] [iterations] [verbose] [-nogui]\n"
