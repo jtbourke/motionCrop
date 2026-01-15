@@ -2,7 +2,7 @@
 //
 // This program analyzes video of aircraft against the sky.
 // Given good source video it creates a cropped video with the aircraft in the center of the frame.
-// 
+//
 // Copyright Jim Bourke, April 28, 2017
 // Released under the terms of the GNU Public license
 //
@@ -15,376 +15,308 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <iostream>
-#include <stdio.h>
-#include <stdlib.h>
+#include <algorithm>
 
 using namespace cv;
 using namespace std;
 
-const int defaultWindowSize = 400;
-const float defaultThresholdScalar = 1.0;
-const int defaultIterations = 2;
-const int defaultVerbose = 0;
+template<typename T>
+T clamp(T val, T lo, T hi) { return max(lo, min(val, hi)); }
 
 struct Config
 	{
-	int windowSize = defaultWindowSize;
-	float thresholdScalar = defaultThresholdScalar;
-	int iterations = defaultIterations;
-	int verbose = defaultVerbose;
-	bool noGui = false;
+	int windowSize;
+	float thresholdScalar;
+	int iterations;
+	int verbose;
+	bool noGui;
+	int codec;
+	const char* codecName;
+
+	Config();
 	};
+
+// Commonly used video codecs
+#define FOURCC(a,b,c,d) (((d)<<24)|((c)<<16)|((b)<<8)|(a))
+
+namespace codecs
+	{
+	struct Entry { const char* name; int fourcc; };
+
+	const Entry list[] =
+		{
+		{ "DIVX", FOURCC('D','I','V','X') },
+		{ "MJPG", FOURCC('M','J','P','G') },
+		{ "MPEG", FOURCC('M','P','E','G') },
+		{ "MPV4", FOURCC('M','P','V','4') },
+		{ "WMV2", FOURCC('W','M','V','2') },
+		};
+
+	const int defaultIndex = 0; // DIVX
+	}
+
+inline Config::Config()
+	: windowSize(400)
+	, thresholdScalar(1.0f)
+	, iterations(2)
+	, verbose(0)
+	, noGui(false)
+	, codec(codecs::list[codecs::defaultIndex].fourcc)
+	, codecName(codecs::list[codecs::defaultIndex].name)
+	{}
+
+// Argument parsing helpers
+void setWindowSize(Config& cfg, const char* value)
+	{
+	cfg.windowSize = clamp(atoi(value), 50, 5000);
+	cout << "Window size set to " << cfg.windowSize << "." << endl;
+	}
+
+void setThreshold(Config& cfg, const char* value)
+	{
+	cfg.thresholdScalar = clamp(static_cast<float>(atof(value)), 0.05f, 2.0f);
+	cout << "Threshold set to " << cfg.thresholdScalar << "." << endl;
+	}
+
+void setIterations(Config& cfg, const char* value)
+	{
+	cfg.iterations = clamp(atoi(value), 1, 5);
+	cout << "Iterations set to " << cfg.iterations << "." << endl;
+	}
+
+void setVerbose(Config& cfg, const char* value)
+	{
+	cfg.verbose = clamp(atoi(value), 0, 1);
+	cout << "Verbose set to " << cfg.verbose << "." << endl;
+	}
+
+bool setCodec(Config& cfg, const char* value)
+	{
+	string name = value;
+	transform(name.begin(), name.end(), name.begin(),
+			  [](unsigned char c) { return static_cast<char>(toupper(c)); });
+
+	for (const auto& e : codecs::list)
+		{
+		if (name == e.name)
+			{
+			cfg.codec = e.fourcc;
+			cfg.codecName = e.name;
+			cout << "Codec set to " << cfg.codecName << "." << endl;
+			return true;
+			}
+		}
+
+	cerr << "Unknown codec: " << value << endl;
+	return false;
+	}
 
 void printUsage(const char* progName)
 	{
-	cout << progName << ":" << endl;
-	cout << "\tStabilizes and crops videos of aircraft against reasonably cloud free skies." << endl << endl;
-	cout << "\tPositional usage (backwards compatible):" << endl;
-	cout << "\t  " << progName << " filename [windowSize] [threshold] [iterations] [verbose] [-nogui]" << endl << endl;
-	cout << "\tFlag-based usage:" << endl;
-	cout << "\t  " << progName << " filename [-w windowSize] [-t threshold] [-i iterations] [-v [level]] [-nogui]" << endl << endl;
-	cout << "\tOutput is written to filename_mcrop.avi" << endl << endl;
-	cout << "\tOptions:" << endl;
-	cout << "\t  -w, -window      Window size in pixels (default " << defaultWindowSize << ")" << endl;
-	cout << "\t  -t, -threshold   Threshold scalar (default " << defaultThresholdScalar << ", try 0.5 if output is jittery)" << endl;
-	cout << "\t  -i, -iterations  Number of dilation iterations (default " << defaultIterations << ", try 3 or 4 if output is jittery)" << endl;
-	cout << "\t  -v, -verbose     Verbose/debug output (default " << defaultVerbose << "; -v or -v 1 to enable)" << endl;
-	cout << "\t  -nogui           Disable all OpenCV windows (batch mode)" << endl << endl;
-	cout << "\tTIPS:" << endl;
-	cout << "\t  If the output is still jittery try sending the output back through the program for another run." << endl;
-	cout << "\t  Abort process using ESC when GUI is enabled." << endl << endl;
-	cout << "\tCopyright 2017 by Jim Bourke." << endl;
+	cout << progName << ":\n"
+		<< "\tStabilizes and crops videos of aircraft against reasonably cloud free skies.\n\n"
+		<< "\tUsage: " << progName << " filename [windowSize] [threshold] [iterations] [verbose] [-nogui]\n"
+		<< "\t   or: " << progName << " filename [-w size] [-t thresh] [-i iter] [-v] [-c codec] [-nogui]\n\n"
+		<< "\tOptions:\n"
+		<< "\t  -w, -window      Window size in pixels (default 400)\n"
+		<< "\t  -t, -threshold   Threshold scalar (default 1.0, try 0.5 if jittery)\n"
+		<< "\t  -i, -iterations  Dilation iterations (default 2, try 3-4 if jittery)\n"
+		<< "\t  -v, -verbose     Enable debug output\n"
+		<< "\t  -c, -codec       Video codec: DIVX (default), MJPG, MPEG, MPV4, WMV2\n"
+		<< "\t  -nogui           Disable GUI windows (batch mode)\n\n"
+		<< "\tOutput: filename_mcrop.avi\n"
+		<< "\tCopyright 2017 by Jim Bourke.\n";
 	}
 
-bool parseArgs( int argc, char** argv, Config& cfg, string& filename )
+bool parseArgs(int argc, char** argv, Config& cfg, string& filename)
 	{
-	if ( argc < 2 )
-		{
-		printUsage( argv[0] );
-		return false;
-		}
+	if (argc < 2) { printUsage(argv[0]); return false; }
 
-	// Detect whether any named options (other than -nogui) are present.
-	bool hasNamedOptions = false;
-	for ( int i = 1; i < argc; ++i )
-		{
-		string arg = argv[i];
-		if ( !arg.empty() && arg[0] == '-' && arg != "-nogui" )
-			{
-			hasNamedOptions = true;
-			break;
-			}
-		}
+	// Check for flag-based arguments
+	bool hasFlags = false;
+	for (int i = 1; i < argc; ++i)
+		if (argv[i][0] == '-' && string(argv[i]) != "-nogui")
+			{ hasFlags = true; break; }
 
-	// Legacy positional mode: filename [windowSize] [threshold] [iterations] [verbose] [-nogui]
-	if ( !hasNamedOptions )
+	if (!hasFlags)
 		{
+		// Legacy positional mode
 		filename = argv[1];
-
-		// Support optional -nogui flag as the last argument.
 		int optArgc = argc;
-		if ( optArgc >= 3 && string( argv[optArgc - 1] ) == "-nogui" )
-			{
-			cfg.noGui = true;
-			--optArgc;
-			}
+		if (optArgc >= 3 && string(argv[optArgc-1]) == "-nogui")
+			{ cfg.noGui = true; --optArgc; }
 
-		if ( optArgc >= 3 )
-			{
-			cfg.windowSize = strtol( argv[2], NULL, 10 );
-			cfg.windowSize = max( cfg.windowSize, 50 );
-			cfg.windowSize = min( cfg.windowSize, 5000 );
-			cout << "Window size set to " << cfg.windowSize << "." << endl;
-			if ( optArgc >= 4 )
-				{
-				cfg.thresholdScalar = float(strtod( argv[3], NULL ));
-				cfg.thresholdScalar = max( cfg.thresholdScalar, 0.05f );
-				cfg.thresholdScalar = min( cfg.thresholdScalar, 2.0f );
-				cout << "Threshold set to " << cfg.thresholdScalar << "." << endl;
-				if ( optArgc >= 5 )
-					{
-					cfg.iterations =  strtol( argv[4], NULL, 10 ) ;
-					cfg.iterations = max( cfg.iterations, 1 );
-					cfg.iterations = min( cfg.iterations, 5 );
-					cout << "Iterations set to " << cfg.iterations << "." << endl;
-					if ( optArgc >= 6 )
-						{
-						cfg.verbose = strtol( argv[5], NULL, 10 );
-						cfg.verbose = max( cfg.verbose, 0 );
-						cfg.verbose = min( cfg.verbose, 1 );
-						cout << "Verbose set to " << cfg.verbose << "." << endl;
-						}
-					}
-				}
-			}
-
+		if (optArgc >= 3) setWindowSize(cfg, argv[2]);
+		if (optArgc >= 4) setThreshold(cfg, argv[3]);
+		if (optArgc >= 5) setIterations(cfg, argv[4]);
+		if (optArgc >= 6) setVerbose(cfg, argv[5]);
 		return true;
 		}
 
-	// Named option mode: filename plus flags like -w, -t, -i, -v, -nogui
-	bool haveFilename = false;
-
-	for ( int i = 1; i < argc; ++i )
+	// Flag-based mode
+	for (int i = 1; i < argc; ++i)
 		{
 		string arg = argv[i];
+		if (arg[0] != '-')
+			{ filename = arg; continue; }
 
-		if ( !arg.empty() && arg[0] == '-' )
+		if (arg == "-nogui") cfg.noGui = true;
+		else if ((arg == "-w" || arg == "-window") && i+1 < argc) setWindowSize(cfg, argv[++i]);
+		else if ((arg == "-t" || arg == "-threshold") && i+1 < argc) setThreshold(cfg, argv[++i]);
+		else if ((arg == "-c" || arg == "-codec") && i+1 < argc)
 			{
-			if ( arg == "-nogui" )
-				{
-				cfg.noGui = true;
-				}
-			else if ( (arg == "-w" || arg == "-window") && i + 1 < argc )
-				{
-				cfg.windowSize = strtol( argv[++i], NULL, 10 );
-				cfg.windowSize = max( cfg.windowSize, 50 );
-				cfg.windowSize = min( cfg.windowSize, 5000 );
-				cout << "Window size set to " << cfg.windowSize << "." << endl;
-				}
-			else if ( (arg == "-t" || arg == "-threshold") && i + 1 < argc )
-				{
-				cfg.thresholdScalar = float(strtod( argv[++i], NULL ));
-				cfg.thresholdScalar = max( cfg.thresholdScalar, 0.05f );
-				cfg.thresholdScalar = min( cfg.thresholdScalar, 2.0f );
-				cout << "Threshold set to " << cfg.thresholdScalar << "." << endl;
-				}
-			else if ( (arg == "-i" || arg == "-iterations") && i + 1 < argc )
-				{
-				cfg.iterations = strtol( argv[++i], NULL, 10 );
-				cfg.iterations = max( cfg.iterations, 1 );
-				cfg.iterations = min( cfg.iterations, 5 );
-				cout << "Iterations set to " << cfg.iterations << "." << endl;
-				}
-			else if ( arg == "-v" || arg == "-verbose" )
-				{
-				// Allow optional numeric level after -v; default to 1 if omitted.
-				if ( i + 1 < argc && argv[i + 1][0] != '-' )
-					{
-					cfg.verbose = strtol( argv[++i], NULL, 10 );
-					}
-				else
-					{
-					cfg.verbose = 1;
-					}
-
-				cfg.verbose = max( cfg.verbose, 0 );
-				cfg.verbose = min( cfg.verbose, 1 );
-				cout << "Verbose set to " << cfg.verbose << "." << endl;
-				}
-			else if ( arg == "-h" || arg == "-help" )
-				{
-				printUsage( argv[0] );
-				return false;
-				}
-			else
-				{
-				cerr << "Unknown option: " << arg << endl;
-				return false;
-				}
+			if (!setCodec(cfg, argv[++i])) return false;
 			}
-		else
+		else if ((arg == "-i" || arg == "-iterations") && i+1 < argc) setIterations(cfg, argv[++i]);
+		else if (arg == "-v" || arg == "-verbose")
 			{
-			if ( !haveFilename )
-				{
-				filename = arg;
-				haveFilename = true;
-				}
-			else
-				{
-				cerr << "Unexpected extra argument: " << arg << endl;
-				return false;
-				}
+			if (i+1 < argc && argv[i+1][0] != '-') setVerbose(cfg, argv[++i]);
+			else { cfg.verbose = 1; cout << "Verbose set to 1." << endl; }
 			}
+		else if (arg == "-h" || arg == "-help") { printUsage(argv[0]); return false; }
+		else { cerr << "Unknown option: " << arg << endl; return false; }
 		}
 
-	if ( !haveFilename )
-		{
-		printUsage( argv[0] );
-		return false;
-		}
-
+	if (filename.empty()) { printUsage(argv[0]); return false; }
 	return true;
 	}
 
-int main( int argc, char** argv )
+// Find the centroid of the largest contour (aircraft) in the frame
+Point findAircraftCentroid(const Mat& frame, const Config& cfg, Mat& hsv, Mat& edges,
+                           Mat& frameMorph, const Mat& kernel,
+                           vector<vector<Point>>& contours, int& largestIndex)
+	{
+	// Convert to HSV and extract Value channel
+	cvtColor(frame, hsv, COLOR_BGR2HSV);
+	Mat channels[3];
+	split(hsv, channels);
+	Mat& frameGray = channels[2];
+
+	if (cfg.verbose && !cfg.noGui) imshow("FrameGray", frameGray);
+
+	// Calculate Otsu threshold for Canny edge detection
+	double otsuThresh = threshold(frameGray, edges, 0, 255, THRESH_BINARY | THRESH_OTSU);
+	if (cfg.verbose && !cfg.noGui) imshow("Otsu", edges);
+
+	// Edge detection
+	Canny(frameGray, edges, otsuThresh * cfg.thresholdScalar, otsuThresh * cfg.thresholdScalar * 0.5);
+	if (cfg.verbose && !cfg.noGui) imshow("Edges", edges);
+
+	// Dilate to close edges
+	dilate(edges, frameMorph, kernel, Point(-1, -1), cfg.iterations);
+	if (cfg.verbose && !cfg.noGui) imshow("Dilation", frameMorph);
+
+	// Find contours
+	vector<Vec4i> hierarchy;
+	findContours(frameMorph, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);
+
+	// Default to frame center
+	Point centroid(frame.cols / 2, frame.rows / 2);
+	largestIndex = -1;
+
+	if (contours.empty()) return centroid;
+
+	// Find largest contour
+	double largestArea = 0;
+	for (size_t i = 0; i < contours.size(); ++i)
+		{
+		double area = contourArea(contours[i]);
+		if (area > largestArea)
+			{ largestArea = area; largestIndex = static_cast<int>(i); }
+		}
+
+	// Calculate centroid from moments
+	if (largestIndex >= 0)
+		{
+		Moments mu = moments(contours[largestIndex]);
+		if (mu.m00 != 0.0)
+			centroid = Point(static_cast<int>(mu.m10 / mu.m00), static_cast<int>(mu.m01 / mu.m00));
+		}
+
+	return centroid;
+	}
+
+// Draw debug visualization on frame
+void drawDebugOverlay(Mat& frame, const vector<vector<Point>>& contours, int largestIndex,
+                      Point centroid, bool verbose)
+	{
+	if (verbose)
+		for (size_t i = 0; i < contours.size(); ++i)
+			drawContours(frame, contours, static_cast<int>(i), Scalar(0, 128, 0), 1);
+
+	if (largestIndex >= 0)
+		{
+		drawContours(frame, contours, largestIndex, Scalar(0, 255, 0), 2);
+		circle(frame, centroid, 9, Scalar(0, 0, 255), 3);
+		}
+	}
+
+int main(int argc, char** argv)
 	{
 	Config cfg;
 	string filename;
+	if (!parseArgs(argc, argv, cfg, filename)) return -1;
 
-	if ( !parseArgs( argc, argv, cfg, filename ) )
+	VideoCapture cap(filename);
+	if (!cap.isOpened())
+		{ cerr << "Cannot open video file: " << filename << endl; return -1; }
+
+	cout << "MotionCrop by Jim Bourke.\n"
+		<< "Window Size: " << cfg.windowSize << "x" << cfg.windowSize << "\n"
+		<< "Frames: " << static_cast<int>(cap.get(CAP_PROP_FRAME_COUNT)) << endl;
+
+	string outputFile = filename.substr(0, filename.find_last_of('.')) + "_mcrop.avi";
+	VideoWriter output(outputFile, cfg.codec,
+	                   cap.get(CAP_PROP_FPS), Size(cfg.windowSize, cfg.windowSize));
+	if (!output.isOpened())
+		{ cerr << "Cannot open output file: " << outputFile << endl; return -1; }
+
+	if (!cfg.noGui)
 		{
-		return -1;
+		namedWindow("Motion Crop", WINDOW_AUTOSIZE);
+		namedWindow("Original", WINDOW_AUTOSIZE);
 		}
 
-	int& windowSize = cfg.windowSize;
-	float& thresholdScalar = cfg.thresholdScalar;
-	int& iterations = cfg.iterations;
-	int& verbose = cfg.verbose;
-	bool noGui = cfg.noGui;
+	Mat frame, buffer, hsv, edges, frameMorph;
+	Mat kernel = getStructuringElement(MORPH_RECT, Size(5, 5));
+	vector<vector<Point>> contours;
 
-	VideoCapture cap( filename );
+	cout << "Processing";
+	int frameNum = 0;
 
-	if ( !cap.isOpened() )  // check if we succeeded
+	while (cap.read(frame))
 		{
-		cout << "Cannot open the video file. \n";
-		return -1;
-		}
+		if (++frameNum % 10 == 0) cout << frameNum;
+		else cout << ".";
 
-	cout << "MotionCrop by Jim Bourke." << endl;
-	cout << "Window Size set to " << windowSize << "x" << windowSize << endl;
+		// Pad frame to handle edge cropping
+		copyMakeBorder(frame, buffer, cfg.windowSize, cfg.windowSize,
+		               cfg.windowSize, cfg.windowSize, BORDER_REPLICATE);
 
-	int length = int( cap.get( CAP_PROP_FRAME_COUNT ) );
-	cout << "Number of frames: " << length << "\n";
+		// Find aircraft centroid
+		int largestIndex;
+		Point centroid = findAircraftCentroid(frame, cfg, hsv, edges, frameMorph, kernel,
+		                                      contours, largestIndex);
 
-	string outputFile = filename.substr( 0, filename.find_last_of( '.' ) ) + "_mcrop.avi";
+		// Draw debug overlay
+		drawDebugOverlay(frame, contours, largestIndex, centroid, cfg.verbose);
 
-	VideoWriter output_cap;
+		// Crop around centroid
+		Rect cropRect(cfg.windowSize + centroid.x - cfg.windowSize/2,
+		              cfg.windowSize + centroid.y - cfg.windowSize/2,
+		              cfg.windowSize, cfg.windowSize);
+		Mat roi = buffer(cropRect);
 
-	// Tried several codecs.  Kept the one that seemed to work all the time.  Found through trial and error!
-	//
-	//	int codec = VideoWriter::fourcc( 'I', 'P', 'D', 'V' );  // select desired codec (must be available at runtime)
-	// int codec = VideoWriter::fourcc( 'M', 'J', 'P', 'G' );  // select desired codec (must be available at runtime)
-	//	int codec = VideoWriter::fourcc( 'W', 'M', 'V', '2' );  // select desired codec (must be available at runtime)
-	//	int codec = VideoWriter::fourcc( 'D', 'I', 'V', '3' );		// for DivX MPEG - 4 codec
-	//	int codec = VideoWriter::fourcc( 'M', 'P', '4', '2' );		// for MPEG - 4 codec
-	int codec = VideoWriter::fourcc( 'D', 'I', 'V', 'X' );		// for DivX codec
-	//int codec = VideoWriter::fourcc( 'H', '2', '6', '4' );		// for DivX codec
-	//	int codec = VideoWriter::fourcc( 'P', 'I', 'M', '1' );		// for MPEG - 1 codec
-	//	int codec = VideoWriter::fourcc( 'I', '2', '6', '3' );		// for ITU H.263 codec
-	//	int codec = VideoWriter::fourcc( 'M', 'P', 'E', 'G' );		// for MPEG - 1 codec
-	// int codec = VideoWriter::fourcc( 'M', 'P', 'V', '4' );		// for MPEG - 1 codec
+		output.write(roi);
 
-	// Create output file
-
-	output_cap.open( outputFile, codec, cap.get( CAP_PROP_FPS ), Size( windowSize, windowSize ), true );
-	// check if we succeeded
-	if ( !output_cap.isOpened() ) {
-		cerr << "Could not open the output video file for write\n";
-		return -1;
-		}
-
-	// Create windows
-	if ( !noGui )
-		{
-		namedWindow( "Motion Crop", WINDOW_AUTOSIZE );
-		namedWindow( "Original", WINDOW_AUTOSIZE );
-		if ( verbose )
+		if (!cfg.noGui)
 			{
-			namedWindow( "FrameGray", WINDOW_AUTOSIZE );
-			namedWindow( "Otsu", WINDOW_AUTOSIZE );
-			namedWindow( "Edges", WINDOW_AUTOSIZE );
-			namedWindow( "Dilation", WINDOW_AUTOSIZE );
+			imshow("Original", frame);
+			imshow("Motion Crop", roi);
+			if (waitKey(30) == 27) break;
 			}
 		}
-	Mat frameGray;
 
-	cout << "Processing " << cap.get( CAP_PROP_FRAME_COUNT ) << " frames." << endl;
-
-	Mat frame;
-	Mat buffer;
-	Mat hsv;
-	Mat hsvSplit[3];
-	Mat edges;
-	Mat frameMorph;
-	Mat roi;
-	Mat kernel = getStructuringElement( MORPH_RECT,
-														 Size( (2 * 2) + 1, (2 * 2) + 1 ) );
-
-	while ( 1 ) 
-		{
-		cout << ".";
-
-		if (( (int)cap.get( CAP_PROP_POS_FRAMES ) % 10 ==0) && (cap.get(CAP_PROP_POS_FRAMES) > 1))
-			cout << (int)cap.get( CAP_PROP_POS_FRAMES );
-
-		//Mat frame;
-		if ( !cap.read( frame ) ) // if not success, break loop
-										  // read() decodes and captures the next frame.
-			{
-			break;
-			}
-
-		// Pad original image so we won't go out of bounds when we crop.  This creates stretching at the edges which is weird but better than the alternative.
-		copyMakeBorder( frame, buffer, windowSize, windowSize,
-							 windowSize, windowSize, BORDER_REPLICATE );
-
-		// Extract hsv and keep value
-		cvtColor( frame, hsv, COLOR_BGR2HSV );
-		split( hsv, hsvSplit );
-		frameGray = hsvSplit[2];
-		if (verbose) imshow( "FrameGray", frameGray );
-		
-		// Calculate OTSU threshold which is useful for Canny edge detection.
-		double otsuThreshold = cv::threshold(frameGray, edges, 0, 255, THRESH_BINARY | THRESH_OTSU	);
-		if ( verbose ) imshow( "Otsu", edges );
-		otsuThreshold *= thresholdScalar;
-
-		// perform edge detection
-		Canny( frameGray, edges, otsuThreshold , otsuThreshold*0.5 );
-		if ( verbose ) imshow( "Edges", edges );
-
-		// dilate the edges to close them.
-		dilate( edges, frameMorph , kernel, Point( -1, -1 ), iterations );
-		if (verbose) imshow( "Dilation", frameMorph );
-
-		/// Find contours
-		vector<vector<Point> > contours;
-		vector<Vec4i> hierarchy;
-		findContours( frameMorph, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE );
-
-		int ctrX = frame.cols / 2;
-		int ctrY = frame.rows / 2;
-		if ( contours.size() > 0 )
-			{
-			int largest_area = 0;
-			int largest_contour_index = 0;
-
-			for ( size_t i = 0; i < contours.size(); ++i ) // iterate through each contour.
-				{
-				double a = contourArea( contours[i], false );  //  Find the area of contour
-				if ( a > largest_area ) {
-					largest_area = (int) a;
-					largest_contour_index = i;                //Store the index of largest contour
-					}
-				if ( verbose ) drawContours( frame, contours, i, Scalar( 0, 128, 0 ), 1, 8, vector<Vec4i>(), 0, Point() );
-				}
-
-			Moments mu;
-			mu = moments( contours[largest_contour_index], false );
-
-			if (mu.m00 != 0.0)
-				{
-				ctrX = (int) (mu.m10 / mu.m00);
-				ctrY = (int) (mu.m01 / mu.m00);
-				}
-
-			// Draw markers to show user what is going on.
-			Scalar color = Scalar(0,255,0);
-			drawContours( frame, contours, largest_contour_index, color, 2, 8, vector<Vec4i>(), 0, Point() );
-			color = Scalar( 0,0,255 );
-			circle( frame, Point( ctrX, ctrY ), 9, color, 3);
-			}
-
-		// crop
-		roi = buffer( Rect( windowSize + ctrX - windowSize / 2, windowSize + ctrY - windowSize / 2, windowSize, windowSize) );
-
-		// Write frame
-		output_cap.write( roi );
-
-		// Display
-		if ( !noGui )
-			{
-			imshow( "Original", frame );
-			imshow( "Motion Crop", roi );
-
-			if ( waitKey( 30 ) == 27 ) // Wait for 'esc' key press to exit
-				{
-				break;
-				}
-			}
-		}
+	cout << "\nDone." << endl;
 	return 0;
 	}
-
-
-
