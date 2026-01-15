@@ -2,7 +2,7 @@
 
 Automatic aircraft video stabilization and cropping tool.
 
-**Author:** Jim Bourke (jtbourke@gmail.com)
+**Author:** Jim Bourke
 **Copyright:** 2017
 **License:** [GNU General Public License v3](LICENSE)
 
