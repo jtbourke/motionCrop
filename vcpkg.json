@@ -1,0 +1,12 @@
+{
+  "name": "motioncrop",
+  "version": "1.0.0",
+  "description": "Automatic aircraft video stabilization and cropping tool",
+  "dependencies": [
+    {
+      "name": "opencv",
+      "default-features": false,
+      "features": ["jpeg", "png", "ffmpeg"]
+    }
+  ]
+}
