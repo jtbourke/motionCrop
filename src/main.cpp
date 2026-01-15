@@ -37,22 +37,28 @@ struct Config
 	};
 
 // Commonly used video codecs
-#define FOURCC(a,b,c,d) (((d)<<24)|((c)<<16)|((b)<<8)|(a))
-
 namespace codecs
 	{
+	constexpr unsigned int fourcc(char a, char b, char c, char d)
+		{
+		return static_cast<unsigned int>(a)
+			| (static_cast<unsigned int>(b) << 8)
+			| (static_cast<unsigned int>(c) << 16)
+			| (static_cast<unsigned int>(d) << 24);
+		}
+
 	struct Entry { const char* name; int fourcc; };
 
-	const Entry list[] =
+	constexpr Entry list[] =
 		{
-		{ "DIVX", FOURCC('D','I','V','X') },
-		{ "MJPG", FOURCC('M','J','P','G') },
-		{ "MPEG", FOURCC('M','P','E','G') },
-		{ "MPV4", FOURCC('M','P','V','4') },
-		{ "WMV2", FOURCC('W','M','V','2') },
+		{ "DIVX", static_cast<int>(fourcc('D','I','V','X')) },
+		{ "MJPG", static_cast<int>(fourcc('M','J','P','G')) },
+		{ "MPEG", static_cast<int>(fourcc('M','P','E','G')) },
+		{ "MPV4", static_cast<int>(fourcc('M','P','V','4')) },
+		{ "WMV2", static_cast<int>(fourcc('W','M','V','2')) },
 		};
 
-	const int defaultIndex = 0; // DIVX
+	constexpr int defaultIndex = 0; // DIVX
 	}
 
 inline Config::Config()
