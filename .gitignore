@@ -396,3 +396,14 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Claude Code
+.claude/
+
+# Release binaries
+*.exe
+*.dll
+*.zip
+
+# vcpkg installed packages
+vcpkg_installed/
