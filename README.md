@@ -12,6 +12,10 @@ Automatic aircraft video stabilization and cropping tool.
 
 Given a video of an airplane surrounded by sky, it crops the video around the airplane to keep it centered in frame.
 
+![MotionCrop example output](docs/screenshot.png)
+
+*Example output from the included sample video, showing the aircraft kept centered in the cropped frame.*
+
 ## How It Works
 
 1. Each frame is converted from RGB to HSV color space
@@ -120,4 +124,14 @@ vcpkg will automatically install OpenCV dependencies on first build:
 msbuild "src/MotionCrop.sln" -p:Configuration=Release -p:Platform=x64
 ```
 
-The first build takes longer as vcpkg downloads and compiles OpenCV.
+The first build takes longer as vcpkg downloads and compiles OpenCV. The resulting `motionCrop.exe` will be placed in `src/x64/Release`, which is the path expected by the test script in this repository.
+
+### Tests
+
+To validate argument parsing and exit codes, you can run the shell test script after building:
+
+```bash
+bash tests/test_args.sh
+```
+
+On Windows, run this from WSL or another Bash environment. On Linux or macOS, adjust the `EXE` path in `tests/test_args.sh` if your build output location differs from `src/x64/Release/motionCrop.exe`.

@@ -1,1 +1,1 @@
-motioncrop Sample.mp4
+motioncrop sample.MP4
