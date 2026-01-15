@@ -23,7 +23,7 @@ jobs:
 
       - name: Build
         run: |
-          msbuild src/MotionCrop.sln -p:Configuration=Release -p:Platform=x64 -p:VcpkgEnableManifest=true -m
+          msbuild src/MotionCrop.sln -p:Configuration=Release -p:Platform=x64 -p:PlatformToolset=v143 -p:VcpkgEnableManifest=true -m
 
       - name: Verify executable
         shell: bash
