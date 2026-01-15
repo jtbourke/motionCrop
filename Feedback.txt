@@ -1,0 +1,8 @@
+From Russell Bell <rb@fastbase.co.nz>
+
+Thanks Jim I will.  Results so far are good.  Before using MotionCrop I have been pre-processing the video as follows (on a linux machine)
+ffmpeg -ss 13:47 -t 260 -i lgt-russell.mp4 -vf "eq=gamma=1.5:saturation=1.3:brightness=0.1:contrast=1.3,unsharp=5:5:2" cut-known.mp4
+
+This cuts the sequence from a longer video (-ss 13:47 -t 260) and also increases the contrast; the higher contrast appears to help the MotionCrop algorithm, the occasional jerky glitches (when MotionCrop loses sync) are less common if I do this step first.
+
+Bye, Russell
