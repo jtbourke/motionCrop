@@ -34,6 +34,8 @@ Download the following files and place them in a folder:
 
 Add the folder to your system PATH.
 
+> **Platform note:** MotionCrop is currently packaged and distributed as a Windows application, and the provided binaries and build instructions target Windows. The core code is standard C++ and OpenCV, so it should compile on Linux or macOS with an appropriate build system and OpenCV installation, but no cross‑platform build files are included yet.
+
 ## Usage
 
 You can run MotionCrop either with positional arguments (original style) or with named flags.
@@ -73,6 +75,8 @@ Or directly:
 ```
 motioncrop samples/sample.MP4
 ```
+
+There is only one sample file in this repository. This is intentional: GitHub's repository size limits make it impractical to ship many large videos, and this particular sample was chosen to highlight both cases where MotionCrop works well and where its behavior breaks down.
 
 ## Limitations
 

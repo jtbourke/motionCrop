@@ -84,8 +84,17 @@ echo "--- Codec Tests ---"
 test_output "-c MJPG" "Codec set to MJPG" "$VIDEO" -c MJPG -nogui
 test_output "-codec mjpg (lowercase)" "Codec set to MJPG" "$VIDEO" -codec mjpg -nogui
 test_output "-c MPEG" "Codec set to MPEG" "$VIDEO" -c MPEG -nogui
-test_output "-c MPV4" "Codec set to MPV4" "$VIDEO" -c MPV4 -nogui
+test_output "-c MP4V" "Codec set to MP4V" "$VIDEO" -c MP4V -nogui
+test_output "-c H264" "Codec set to H264" "$VIDEO" -c H264 -nogui
+test_output "-c X264" "Codec set to X264" "$VIDEO" -c X264 -nogui
+test_output "-c AVC1" "Codec set to AVC1" "$VIDEO" -c AVC1 -nogui
 test_output "-c WMV2" "Codec set to WMV2" "$VIDEO" -c WMV2 -nogui
+
+echo ""
+echo "--- Format Tests ---"
+test_output "-f avi" "Output format set to avi" "$VIDEO" -f avi -nogui
+test_output "-f mp4" "Output format set to mp4" "$VIDEO" -f mp4 -nogui
+test_output "-format MP4 (uppercase)" "Output format set to mp4" "$VIDEO" -format MP4 -nogui
 
 echo ""
 echo "--- Clamping Tests ---"
@@ -98,6 +107,7 @@ echo ""
 echo "--- Error Tests ---"
 test_output "Unknown option -x" "Unknown option" "$VIDEO" -x
 test_output "Unknown codec" "Unknown codec" "$VIDEO" -c INVALID -nogui
+test_output "Unknown format" "Unknown format" "$VIDEO" -f wmv -nogui
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
