@@ -14,8 +14,6 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
-#include "opencv2/features2d/features2d.hpp"
-#include "opencv2/photo.hpp"
 #include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,59 +26,201 @@ const float defaultThresholdScalar = 1.0;
 const int defaultIterations = 2;
 const int defaultVerbose = 0;
 
-int windowSize = defaultWindowSize;
-float thresholdScalar = defaultThresholdScalar;
-int iterations = defaultIterations;
-int verbose = defaultVerbose;
-
-int main( int argc, char** argv )
+struct Config
 	{
+	int windowSize = defaultWindowSize;
+	float thresholdScalar = defaultThresholdScalar;
+	int iterations = defaultIterations;
+	int verbose = defaultVerbose;
+	bool noGui = false;
+	};
 
+void printUsage(const char* progName)
+	{
+	cout << progName << ":" << endl;
+	cout << "\tStabilizes and crops videos of aircraft against reasonably cloud free skies." << endl << endl;
+	cout << "\tPositional usage (backwards compatible):" << endl;
+	cout << "\t  " << progName << " filename [windowSize] [threshold] [iterations] [verbose] [-nogui]" << endl << endl;
+	cout << "\tFlag-based usage:" << endl;
+	cout << "\t  " << progName << " filename [-w windowSize] [-t threshold] [-i iterations] [-v [level]] [-nogui]" << endl << endl;
+	cout << "\tOutput is written to filename_mcrop.avi" << endl << endl;
+	cout << "\tOptions:" << endl;
+	cout << "\t  -w, -window      Window size in pixels (default " << defaultWindowSize << ")" << endl;
+	cout << "\t  -t, -threshold   Threshold scalar (default " << defaultThresholdScalar << ", try 0.5 if output is jittery)" << endl;
+	cout << "\t  -i, -iterations  Number of dilation iterations (default " << defaultIterations << ", try 3 or 4 if output is jittery)" << endl;
+	cout << "\t  -v, -verbose     Verbose/debug output (default " << defaultVerbose << "; -v or -v 1 to enable)" << endl;
+	cout << "\t  -nogui           Disable all OpenCV windows (batch mode)" << endl << endl;
+	cout << "\tTIPS:" << endl;
+	cout << "\t  If the output is still jittery try sending the output back through the program for another run." << endl;
+	cout << "\t  Abort process using ESC when GUI is enabled." << endl << endl;
+	cout << "\tCopyright 2017 by Jim Bourke." << endl;
+	}
+
+bool parseArgs( int argc, char** argv, Config& cfg, string& filename )
+	{
 	if ( argc < 2 )
 		{
-		cout << argv[0] << ":" << endl;
-		cout << "\tStabilizes and crops videos of aircraft against reasonably cloud free skies." << endl << endl;
-		cout << "\tUsage: " << argv[0] << " filename [windowSize] [threshold] [iterations] [verbose]" << endl;
-		cout << "\tOutput written to filename_mcrop.avi" << endl << endl;
-		cout << "\twindowSize is optional and defaults to " << defaultWindowSize << " pixels." << endl << endl;
-		cout << "\tthreshold is optional and defaults to " << defaultThresholdScalar << ".  Try .5 if the output is jittery." << endl << endl;
-		cout << "\titerations is optional and defaults to " << defaultThresholdScalar << ".  Try 1 to save time.  Try 3 or 4 if the output is jittery." << endl << endl;
-		cout << "\tdebug is optional and defaults to " << defaultVerbose << ".  Try 1 if you are trying to diagnose a problem." << endl << endl;
-		cout << "\tTIPS:" << endl << "\t\tIf the output is still jittery try sending the output back through the program for another run." << endl;
-		cout << "\t\tAbort process using ESC." << endl << endl;
-		cout << "\tCopyright 2017 by Jim Bourke." << endl;
-		return -1;
+		printUsage( argv[0] );
+		return false;
 		}
-	if ( argc >= 3 )
+
+	// Detect whether any named options (other than -nogui) are present.
+	bool hasNamedOptions = false;
+	for ( int i = 1; i < argc; ++i )
 		{
-		windowSize = strtol( argv[2], NULL, 10 );
-		windowSize = max( windowSize, 50 );
-		windowSize = min( windowSize, 5000 );
-		cout << "Window size set to " << windowSize << "." << endl;
-		if ( argc >= 4 )
+		string arg = argv[i];
+		if ( !arg.empty() && arg[0] == '-' && arg != "-nogui" )
 			{
-			thresholdScalar = float(strtod( argv[3], NULL ));
-			thresholdScalar = max( thresholdScalar, 0.05f );
-			thresholdScalar = min( thresholdScalar, 2.0f );
-			cout << "Threshold set to " << thresholdScalar << "." << endl;
-			if ( argc >= 5 )
+			hasNamedOptions = true;
+			break;
+			}
+		}
+
+	// Legacy positional mode: filename [windowSize] [threshold] [iterations] [verbose] [-nogui]
+	if ( !hasNamedOptions )
+		{
+		filename = argv[1];
+
+		// Support optional -nogui flag as the last argument.
+		int optArgc = argc;
+		if ( optArgc >= 3 && string( argv[optArgc - 1] ) == "-nogui" )
+			{
+			cfg.noGui = true;
+			--optArgc;
+			}
+
+		if ( optArgc >= 3 )
+			{
+			cfg.windowSize = strtol( argv[2], NULL, 10 );
+			cfg.windowSize = max( cfg.windowSize, 50 );
+			cfg.windowSize = min( cfg.windowSize, 5000 );
+			cout << "Window size set to " << cfg.windowSize << "." << endl;
+			if ( optArgc >= 4 )
 				{
-				iterations =  strtol( argv[4], NULL, 10 ) ;
-				iterations = max( iterations, 1 );
-				iterations = min( iterations, 5 );
-				cout << "Iterations set to " << iterations << "." << endl;
-				if ( argc >= 6 )
+				cfg.thresholdScalar = float(strtod( argv[3], NULL ));
+				cfg.thresholdScalar = max( cfg.thresholdScalar, 0.05f );
+				cfg.thresholdScalar = min( cfg.thresholdScalar, 2.0f );
+				cout << "Threshold set to " << cfg.thresholdScalar << "." << endl;
+				if ( optArgc >= 5 )
 					{
-					verbose = strtol( argv[4], NULL, 10 );
-					verbose = max( iterations, 0 );
-					verbose = min( iterations, 1 );
-					cout << "Verbose set to " << verbose << "." << endl;
+					cfg.iterations =  strtol( argv[4], NULL, 10 ) ;
+					cfg.iterations = max( cfg.iterations, 1 );
+					cfg.iterations = min( cfg.iterations, 5 );
+					cout << "Iterations set to " << cfg.iterations << "." << endl;
+					if ( optArgc >= 6 )
+						{
+						cfg.verbose = strtol( argv[5], NULL, 10 );
+						cfg.verbose = max( cfg.verbose, 0 );
+						cfg.verbose = min( cfg.verbose, 1 );
+						cout << "Verbose set to " << cfg.verbose << "." << endl;
+						}
 					}
 				}
 			}
+
+		return true;
 		}
-	
-	string filename = argv[1];
+
+	// Named option mode: filename plus flags like -w, -t, -i, -v, -nogui
+	bool haveFilename = false;
+
+	for ( int i = 1; i < argc; ++i )
+		{
+		string arg = argv[i];
+
+		if ( !arg.empty() && arg[0] == '-' )
+			{
+			if ( arg == "-nogui" )
+				{
+				cfg.noGui = true;
+				}
+			else if ( (arg == "-w" || arg == "-window") && i + 1 < argc )
+				{
+				cfg.windowSize = strtol( argv[++i], NULL, 10 );
+				cfg.windowSize = max( cfg.windowSize, 50 );
+				cfg.windowSize = min( cfg.windowSize, 5000 );
+				cout << "Window size set to " << cfg.windowSize << "." << endl;
+				}
+			else if ( (arg == "-t" || arg == "-threshold") && i + 1 < argc )
+				{
+				cfg.thresholdScalar = float(strtod( argv[++i], NULL ));
+				cfg.thresholdScalar = max( cfg.thresholdScalar, 0.05f );
+				cfg.thresholdScalar = min( cfg.thresholdScalar, 2.0f );
+				cout << "Threshold set to " << cfg.thresholdScalar << "." << endl;
+				}
+			else if ( (arg == "-i" || arg == "-iterations") && i + 1 < argc )
+				{
+				cfg.iterations = strtol( argv[++i], NULL, 10 );
+				cfg.iterations = max( cfg.iterations, 1 );
+				cfg.iterations = min( cfg.iterations, 5 );
+				cout << "Iterations set to " << cfg.iterations << "." << endl;
+				}
+			else if ( arg == "-v" || arg == "-verbose" )
+				{
+				// Allow optional numeric level after -v; default to 1 if omitted.
+				if ( i + 1 < argc && argv[i + 1][0] != '-' )
+					{
+					cfg.verbose = strtol( argv[++i], NULL, 10 );
+					}
+				else
+					{
+					cfg.verbose = 1;
+					}
+
+				cfg.verbose = max( cfg.verbose, 0 );
+				cfg.verbose = min( cfg.verbose, 1 );
+				cout << "Verbose set to " << cfg.verbose << "." << endl;
+				}
+			else if ( arg == "-h" || arg == "-help" )
+				{
+				printUsage( argv[0] );
+				return false;
+				}
+			else
+				{
+				cerr << "Unknown option: " << arg << endl;
+				return false;
+				}
+			}
+		else
+			{
+			if ( !haveFilename )
+				{
+				filename = arg;
+				haveFilename = true;
+				}
+			else
+				{
+				cerr << "Unexpected extra argument: " << arg << endl;
+				return false;
+				}
+			}
+		}
+
+	if ( !haveFilename )
+		{
+		printUsage( argv[0] );
+		return false;
+		}
+
+	return true;
+	}
+
+int main( int argc, char** argv )
+	{
+	Config cfg;
+	string filename;
+
+	if ( !parseArgs( argc, argv, cfg, filename ) )
+		{
+		return -1;
+		}
+
+	int& windowSize = cfg.windowSize;
+	float& thresholdScalar = cfg.thresholdScalar;
+	int& iterations = cfg.iterations;
+	int& verbose = cfg.verbose;
+	bool noGui = cfg.noGui;
 
 	VideoCapture cap( filename );
 
@@ -124,11 +264,19 @@ int main( int argc, char** argv )
 		}
 
 	// Create windows
-	namedWindow( "Motion Crop", WINDOW_AUTOSIZE );
-	namedWindow( "Original", WINDOW_AUTOSIZE );
-
+	if ( !noGui )
+		{
+		namedWindow( "Motion Crop", WINDOW_AUTOSIZE );
+		namedWindow( "Original", WINDOW_AUTOSIZE );
+		if ( verbose )
+			{
+			namedWindow( "FrameGray", WINDOW_AUTOSIZE );
+			namedWindow( "Otsu", WINDOW_AUTOSIZE );
+			namedWindow( "Edges", WINDOW_AUTOSIZE );
+			namedWindow( "Dilation", WINDOW_AUTOSIZE );
+			}
+		}
 	Mat frameGray;
-	Mat channels[3];
 
 	cout << "Processing " << cap.get( CAP_PROP_FRAME_COUNT ) << " frames." << endl;
 
@@ -139,6 +287,8 @@ int main( int argc, char** argv )
 	Mat edges;
 	Mat frameMorph;
 	Mat roi;
+	Mat kernel = getStructuringElement( MORPH_RECT,
+														 Size( (2 * 2) + 1, (2 * 2) + 1 ) );
 
 	while ( 1 ) 
 		{
@@ -174,8 +324,6 @@ int main( int argc, char** argv )
 		if ( verbose ) imshow( "Edges", edges );
 
 		// dilate the edges to close them.
-		Mat kernel = getStructuringElement( MORPH_RECT,
-																  Size( (2 * 2) + 1, (2 * 2) + 1 ) );
 		dilate( edges, frameMorph , kernel, Point( -1, -1 ), iterations );
 		if (verbose) imshow( "Dilation", frameMorph );
 
@@ -184,14 +332,14 @@ int main( int argc, char** argv )
 		vector<Vec4i> hierarchy;
 		findContours( frameMorph, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE );
 
-		int ctrX = 0;
-		int ctrY = 0;
+		int ctrX = frame.cols / 2;
+		int ctrY = frame.rows / 2;
 		if ( contours.size() > 0 )
 			{
 			int largest_area = 0;
 			int largest_contour_index = 0;
 
-			for ( int i = 0; i < contours.size(); i++ ) // iterate through each contour.
+			for ( size_t i = 0; i < contours.size(); ++i ) // iterate through each contour.
 				{
 				double a = contourArea( contours[i], false );  //  Find the area of contour
 				if ( a > largest_area ) {
@@ -204,8 +352,11 @@ int main( int argc, char** argv )
 			Moments mu;
 			mu = moments( contours[largest_contour_index], false );
 
-			ctrX = (int) (mu.m10 / mu.m00);
-			ctrY = (int) (mu.m01 / mu.m00);
+			if (mu.m00 != 0.0)
+				{
+				ctrX = (int) (mu.m10 / mu.m00);
+				ctrY = (int) (mu.m01 / mu.m00);
+				}
 
 			// Draw markers to show user what is going on.
 			Scalar color = Scalar(0,255,0);
@@ -221,12 +372,15 @@ int main( int argc, char** argv )
 		output_cap.write( roi );
 
 		// Display
-		imshow( "Original", frame );
-		imshow( "Motion Crop", roi );
-
-		if ( waitKey( 30 ) == 27 ) // Wait for 'esc' key press to exit
+		if ( !noGui )
 			{
-			break;
+			imshow( "Original", frame );
+			imshow( "Motion Crop", roi );
+
+			if ( waitKey( 30 ) == 27 ) // Wait for 'esc' key press to exit
+				{
+				break;
+				}
 			}
 		}
 	return 0;
