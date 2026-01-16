@@ -16,6 +16,15 @@ Given a video of an airplane surrounded by sky, it crops the video around the ai
 
 *Example output from the included sample video, showing the aircraft kept centered in the cropped frame.*
 
+### Videos
+
+MotionCrop in action at the World Aerobatic Championships:
+
+- [WAC 2022 - Olivier Masurel - Second Unknown - MotionCrop](https://www.youtube.com/watch?v=NL7VxPb2HbA)
+- [WAC 2022 - Rob Holland - Second Unknown - MotionCrop](https://www.youtube.com/watch?v=oFEm2EbF3-M)
+- [WAC 2022 - Rob Holland - First Unknown - MotionCrop](https://www.youtube.com/watch?v=8KnWc_HxpVU)
+- [MotionCrop test - WAC 2017 Free Unknown 3](https://www.youtube.com/watch?v=NJEDFW_lXgY)
+
 ## How It Works
 
 1. Each frame is converted from RGB to HSV color space
